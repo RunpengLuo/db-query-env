@@ -1,0 +1,9 @@
+dependencies
+
+pandas
+minimap2
+
+
+
+main.py build -f<a|q> <k> <out_dir> <ref> <ref> ... <ref>
+main.py query -f<a|q> <db_dir> <out_dir> <query>

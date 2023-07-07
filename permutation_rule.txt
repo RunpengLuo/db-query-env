@@ -1,0 +1,8 @@
+1*YEE vector
+23*promoter
+46*signal peptide
+1*HSA
+1*xaMF
+6*terminator
+
+YEE -> promoter -> singal_peptide -> HSA -> xaMF -> terminator -> YEE
