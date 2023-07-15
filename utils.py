@@ -1,5 +1,4 @@
 import os
-import sys
 from transformer import *
 
 def System(command: str):
@@ -132,37 +131,37 @@ def get_reads(only_id=True):
 
 def read_idx_file(idx_file: str):
     idx_arrs = None
+    len_mat = None
     # read idx_file
     with open(idx_file, "r") as idx_fd:
         num_comp = int(idx_fd.readline().strip())
         idx_arrs = [[] for _ in range(num_comp)]
+        len_mat = [[] for _ in range(num_comp)]
         glb_idx = 0 # index between components
         for line in idx_fd:
             if line == "\n":
                 glb_idx += 1
                 continue
             
-            [_, sid] = line.strip().split("\t")
+            [_, kcount, sid] = line.strip().split("\t")
             idx_arrs[glb_idx].append(sid)
+            len_mat[glb_idx].append(int(kcount))
         idx_fd.close()
-    return idx_arrs
+    return idx_arrs, len_mat
 
 def read_db_file(db_file: str):
-    glb_kmer_table = {}
+    ukmer_table = {}
     k = -1
     with open(db_file, "r") as db_fd:
         k = int(db_fd.readline().strip())
         for line in db_fd:
-            attrs = line.strip().split("\t")
-            kmer, idts = attrs[0], attrs[1:]
-            kint = alpha2int(kmer)
-            assert kint not in glb_kmer_table
-            glb_kmer_table[kint] = []
-            for idt in idts:
-                cidx,sidx = [int(x) for x in idt.split(":")]
-                glb_kmer_table[kint].append((cidx, sidx))
+            kmer, idt = line.strip().split("\t")
+            kint = int(kmer)
+            assert kint not in ukmer_table
+            cidx, sidx = [int(x) for x in idt.split(":")]
+            ukmer_table[kint] = (cidx, sidx)
         db_fd.close()
-    return glb_kmer_table, k
+    return ukmer_table, k
 
 
 class Node:
@@ -200,7 +199,7 @@ class LinkedList:
         
         return "->".join(arr)
 
-    def arr_filter(self, fil_key="") -> str:
+    def arr_filter(self, fil_key=""):
         arr = []
         node = self.start.next # exclude root node
         while node != None:
@@ -210,6 +209,16 @@ class LinkedList:
         
         return arr
 
+    def to_arr_noN(self) -> list:
+        # assume the key has the form `i:j`, resulting [(i,j,c)..] 3-ple list
+        arr = []
+        node = self.start.next # exclude root node
+        while node != None:
+            [i, j] = node.key.split(",")
+            arr.append([int(i), int(j), node.count])
+            node = node.next
+        
+        return arr
 
 
 def merge(dst: Node, src: Node, add_count):
@@ -226,28 +235,6 @@ def merge(dst: Node, src: Node, add_count):
         dst.next_none += src.count
     return dst
 
-    
-def iter_merge(ll: LinkedList):
-    """
-    iterative merge the adjacent node if having same key
-    """
-    curr = ll.source()
-
-    while curr.next != None:
-        next = curr.next
-        if curr.key == next.key:
-            # print("merging: ", curr.key, next.key, curr.count)
-            curr = merge(curr, next, True)
-        else:
-            curr = next
-    # reaching last node, check if first node and last node can merge, soft merge, no link inheritance
-    if ll.source().next != None:
-        if ll.source().next.key == curr.key:
-            # add count to first node
-            ll.source().next.count += curr.count
-            # remove last node
-            curr.prev.next = None
-    return ll
 
 def iter_merge_del(ll: LinkedList, del_key: str):
     """
@@ -271,42 +258,40 @@ def iter_merge_del(ll: LinkedList, del_key: str):
             curr.prev.next = None
     return ll
 
-
-def iter_del(ll: LinkedList, del_key: str):
-    """
-    iterative delete the node with `del_key`
-    """
-    curr = ll.source()
-    while curr.next != None:
-        next = curr.next
-        if next.key == del_key:
-            curr = merge(curr, next, False)
-        else:
-            curr = next
-    return ll
-
 def cyc_lis_lds(arr: list, size_arr: int, start_idx: int):
     """
-    Dynamic programming to compute LIS and LDS.
+    Dynamic programming to compute longest increasing sequence (LIS) and longest decreasing sequence(LDS).
+    O (n^2) complexity.
     """
+    def compareTo(elem1: tuple, elem2: tuple):
+        return elem1[0] > elem2[0]
+
+    def sum_weight(arr_t: list):
+        return sum(val[2] for val in arr_t)
+
     # circular array starting from arr[start_idx]
-    dp_lis = [None for _ in range(size_arr)]
+    dp_lis = [None for _ in range(size_arr)] # dp_lis[i]: lis ending with ith element
     dp_lis[0] = [arr[start_idx]]
     dp_lds = [None for _ in range(size_arr)]
     dp_lds[0] = [arr[start_idx]]
     # arr[start_idx], arr[start_idx + 1], ... arr[(start_idx + size_arr - 1) % size_arr]
-    rot_arr = [arr[start_idx]]
     for acc in range(1, size_arr):
-        curr_elem = arr[(start_idx + acc) % size_arr]
-        rot_arr.append(curr_elem)
+        curr_elem = arr[(start_idx + acc) % size_arr] # FIXME should consider int instead of i:j str pair, since `11` < `5` in str
         lis_arr = []
         lds_arr = []
         for j in range(0, acc):
-            if len(dp_lis[j]) > len(lis_arr):
-                if curr_elem > dp_lis[j][-1]:
+            if compareTo(curr_elem, dp_lis[j][-1]):
+                if len(dp_lis[j]) > len(lis_arr):
+                    # longest first
                     lis_arr = dp_lis[j]
-            if len(dp_lds[j]) > len(lds_arr):
-                if curr_elem < dp_lds[j][-1]:
+                elif len(dp_lis[j]) == len(lis_arr) and sum_weight(dp_lis[j]) > sum_weight(lis_arr):
+                    lis_arr = dp_lis[j]
+
+            if compareTo(dp_lds[j][-1], curr_elem):
+                if len(dp_lds[j]) > len(lds_arr):
+                    # longest first
+                    lds_arr = dp_lds[j]
+                elif len(dp_lds[j]) == len(lds_arr) and sum_weight(dp_lds[j]) > sum_weight(lds_arr):
                     lds_arr = dp_lds[j]
 
         dp_lis[acc] = list(lis_arr) # deep copy
